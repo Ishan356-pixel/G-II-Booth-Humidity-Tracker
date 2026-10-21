@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Telemetry (Tabbed)</title>
+<style>
+  :root {
+    --bg: #f7f8f6; --surface: #ffffff; --text: #1d2521; --muted: #5d6b64;
+    --line: #d9dfdb; --accent: #1f6f5b; --bad: #b3402a; --ok: #1f6f5b;
+    --temp: #c2531b; --hum: #2b6cb0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141a17; --surface: #1c2420; --text: #e6ece8; --muted: #96a59d;
+      --line: #2c3731; --accent: #5cc4a6; --bad: #e07a63; --ok: #5cc4a6;
+      --temp: #f0925f; --hum: #7db4f0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 16px; }
+  h2 { font-size: 1.1rem; margin: 0; }
+
+  [role="tablist"] { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+  [role="tab"] { font: inherit; background: none; border: 0; color: var(--muted); padding: 8px 16px;
+                 cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  [role="tab"]:focus-visible, button:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+  [role="tabpanel"][hidden] { display: none; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+  .box { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 20px; }
+  .box span { display: block; color: var(--muted); font-size: .85rem; }
+  .box strong { font-size: 1.6rem; }
+  .big strong { font-size: 2.6rem; }
+  .good { color: var(--ok); } .bad { color: var(--bad); }
+
+  .bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  button.primary { font: inherit; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+                   border: 1px solid var(--accent); background: var(--accent); color: var(--bg); }
+  .wrap { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--surface); }
+  .empty { color: var(--muted); padding: 16px 12px; }
+  .chart { background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+           padding: 12px; height: 300px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ESP32 telemetry (tabbed)</h1>
+
+  <div role="tablist" aria-label="Dashboard sections">
+    <button role="tab" id="tab-status" aria-controls="panel-status" aria-selected="true">Status</button>
+    <button role="tab" id="tab-data" aria-controls="panel-data" aria-selected="false">Data</button>
+    <button role="tab" id="tab-graphs" aria-controls="panel-graphs" aria-selected="false">Graphs</button>
+  </div>
+
+  <!-- Tab 1: status -->
+  <section role="tabpanel" id="panel-status" aria-labelledby="tab-status">
+    <div class="row">
+      <div class="box"><span>Broker connection</span><strong id="broker">Connecting…</strong></div>
+      <div class="box"><span>ESP32</span><strong id="esp">No data yet</strong></div>
+      <div class="box"><span>Last reading</span><strong id="last">–</strong></div>
+    </div>
+    <div class="row">
+      <div class="box big"><span>Temperature (°C)</span><strong id="temp">–</strong></div>
+      <div class="box big"><span>Humidity (%)</span><strong id="hum">–</strong></div>
+    </div>
+  </section>
+
+  <!-- Tab 2: all data -->
+  <section role="tabpanel" id="panel-data" aria-labelledby="tab-data" hidden>
+    <div class="bar">
+      <h2><span id="count">0</span> readings</h2>
+      <button class="primary" id="export">Export CSV</button>
+    </div>
+    <div class="wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Temp (°C)</th><th>Humidity (%)</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="empty">Waiting for the first reading from the ESP32.</div>
+    </div>
+  </section>
+
+  <!-- Tab 3: graphs -->
+  <section role="tabpanel" id="panel-graphs" aria-labelledby="tab-graphs" hidden>
+    <div class="chart"><canvas id="tempChart"></canvas></div>
+    <div class="chart"><canvas id="humChart"></canvas></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script>
+  // ---- Settings: change these to match your ESP32 code ----
+  const BROKER_URL = "wss://broker.hivemq.com:8884/mqtt";
+  const TOPIC = "diddy-esp32/telemetry";
+  const STALE_SECONDS = 15;   // ESP32 counts as "not transmitting" after this long with no reading
+  // ---------------------------------------------------------
+
+  const $ = (id) => document.getElementById(id);
+  const readings = [];        // all readings, kept in memory while the page is open
+  let lastMsg = null;
+
+  // ---------- Tabs ----------
+  const tabs = ["status", "data", "graphs"];
+  function showTab(name) {
+    tabs.forEach((t) => {
+      $("tab-" + t).setAttribute("aria-selected", t === name);
+      $("panel-" + t).hidden = t !== name;
+    });
+    if (name === "graphs") { tempChart.resize(); humChart.resize(); }
+  }
+  tabs.forEach((t) => $("tab-" + t).addEventListener("click", () => showTab(t)));
+
+  // ---------- Charts ----------
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  function makeChart(canvasId, title, colorVar) {
+    return new Chart($(canvasId), {
+      type: "line",
+      data: { datasets: [{ data: [], borderColor: css(colorVar), backgroundColor: css(colorVar),
+                           pointRadius: 2, borderWidth: 2, tension: 0.2 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+        plugins: { legend: { display: false }, title: { display: true, text: title, color: css("--text") } },
+        scales: {
+          x: { type: "linear", min: 0, title: { display: true, text: "", color: css("--muted") },
+               ticks: { maxTicksLimit: 8, color: css("--muted"), callback: (v) => +v.toFixed(2) },
+               grid: { color: css("--line") } },
+          y: { ticks: { color: css("--muted") }, grid: { color: css("--line") } }
+        }
+      }
+    });
+  }
+  const tempChart = makeChart("tempChart", "Temperature (°C) over time", "--temp");
+  const humChart = makeChart("humChart", "Humidity (%) over time", "--hum");
+
+  // The time axis switches between seconds, minutes and hours based on elapsed time.
+  function updateCharts() {
+    if (!readings.length) return;
+    const t0 = readings[0].time;
+    const elapsed = (readings[readings.length - 1].time - t0) / 1000;
+    const [unit, div] = elapsed < 120 ? ["seconds", 1] : elapsed < 7200 ? ["minutes", 60] : ["hours", 3600];
+    [[tempChart, "temp"], [humChart, "hum"]].forEach(([chart, key]) => {
+      chart.data.datasets[0].data = readings
+        .filter((r) => typeof r[key] === "number")
+        .map((r) => ({ x: (r.time - t0) / 1000 / div, y: r[key] }));
+      chart.options.scales.x.title.text = "Time elapsed (" + unit + ")";
+      chart.update();
+    });
+  }
+
+  // ---------- Status ----------
+  function ago(s) {
+    s = Math.round(s);
+    return s < 60 ? s + " s" : s < 3600 ? Math.floor(s / 60) + " min " + (s % 60) + " s"
+                                         : Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min";
+  }
+  function setBroker(text, good) {
+    $("broker").textContent = text;
+    $("broker").className = good ? "good" : "bad";
+  }
+  function refreshEsp() {
+    if (!lastMsg) { $("esp").textContent = "No data yet"; $("esp").className = "bad"; return; }
+    const age = (Date.now() - lastMsg) / 1000;
+    if (age <= STALE_SECONDS) { $("esp").textContent = "Transmitting"; $("esp").className = "good"; }
+    else { $("esp").textContent = "No data for " + ago(age); $("esp").className = "bad"; }
+    $("last").textContent = lastMsg.toLocaleTimeString ? lastMsg.toLocaleTimeString() : "–";
+  }
+  setInterval(refreshEsp, 1000);
+
+  // ---------- MQTT ----------
+  // The client ID must be different from the one the ESP32 uses.
+  const client = mqtt.connect(BROKER_URL, {
+    clientId: "web-" + Math.random().toString(16).slice(2, 10),
+    reconnectPeriod: 3000
+  });
+  client.on("connect", () => { setBroker("Connected", true); client.subscribe(TOPIC); });
+  client.on("reconnect", () => setBroker("Reconnecting…", false));
+  client.on("offline", () => setBroker("Offline", false));
+  client.on("error", (e) => setBroker("Error: " + e.message, false));
+
+  client.on("message", (topic, payload) => {
+    let data;
+    try { data = JSON.parse(payload.toString()); } catch (e) { return; }
+    const row = { time: new Date(), temp: data.temp_c, hum: data.humidity };
+    readings.push(row);
+    lastMsg = row.time;
+
+    $("temp").textContent = row.temp ?? "–";
+    $("hum").textContent = row.hum ?? "–";
+    $("count").textContent = readings.length;
+    $("empty").style.display = "none";
+    const tr = document.createElement("tr");
+    [row.time.toLocaleString(), row.temp, row.hum].forEach((v) => {
+      const td = document.createElement("td");
+      td.textContent = v ?? "";
+      tr.appendChild(td);
+    });
+    $("rows").prepend(tr);          // newest first
+    refreshEsp();
+    updateCharts();
+  });
+
+  // ---------- CSV export ----------
+  $("export").addEventListener("click", () => {
+    if (!readings.length) return;
+    const lines = ["time,temp_c,humidity"].concat(
+      readings.map((r) => [r.time.toISOString(), r.temp, r.hum].join(","))
+    );
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+    a.download = "esp32-readings.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+</script>
+</body>
+</html>
