@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Telemetry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#eef1ef;--panel:#fbfcfb;--ink:#17211e;--mute:#66756f;--line:#d5dcd8;--accent:#0e7c66;--rec:#c0392b;--wait:#b7791f}
+@media (prefers-color-scheme:dark){:root{--bg:#121816;--panel:#1a2320;--ink:#e6eeea;--mute:#8c9c95;--line:#2e3b36;--accent:#3fc7a4;--rec:#ff6b5a;--wait:#e0a93b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+h1{font-size:22px;font-weight:600;margin:0}
+.sub{color:var(--mute);font-size:13px}
+.status{display:flex;align-items:center;gap:8px;font-size:14px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--wait)}
+.dot.on{background:var(--accent)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+button,select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:7px 14px;cursor:pointer}
+button:hover,select:hover{border-color:var(--mute)}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.rec{border-color:var(--rec);color:var(--rec);font-weight:500}
+button.go{border-color:var(--accent);color:var(--accent);font-weight:500}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px}
+.ph{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.ph h2{font-size:16px;font-weight:600;margin:0}
+.ph label{display:flex;align-items:center;gap:8px;color:var(--mute);font-size:14px}
+.chartbox{position:relative;height:300px}
+.wrap{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:7px 12px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);font-weight:600}
+tbody tr+tr td{border-top:1px solid var(--line)}
+.empty{padding:28px;text-align:center;color:var(--mute)}
+.ctl{display:grid;gap:12px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+label{color:var(--ink)}
+input[type=text],input[type=number],input[type=password]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rule{display:flex;align-items:center;gap:10px}
+.rule span{min-width:90px;font-weight:500}
+.pill{padding:2px 10px;border-radius:999px;border:1px solid var(--line);font-size:13px}
+.pill.on{border-color:var(--accent);color:var(--accent)}
+.pill.off{border-color:var(--rec);color:var(--rec)}
+#log{max-height:120px;overflow:auto;font-size:13px;color:var(--mute);margin:0;padding-left:18px}
+.plug{border:1px solid var(--line);border-radius:8px;padding:12px;display:grid;gap:10px}
+.rule{flex-wrap:wrap}
+[hidden]{display:none!important}
+#login{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:10;padding:16px}
+body:not(.locked) #login{display:none}
+body.locked main{display:none}
+#lf{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:24px;display:grid;gap:14px;width:min(360px,100%)}
+#lf h1{font-size:20px}
+#lf label{display:grid;gap:4px;font-size:14px}
+button.danger{background:var(--rec);border-color:var(--rec);color:#fff;font-weight:600}
+.banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;background:var(--panel);border:1px solid var(--rec);color:var(--rec);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-weight:500}
+.tg{padding:4px 10px}
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:20px;max-width:440px}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog p{margin-top:0}
+#picker{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:9;padding:16px}
+body:not(.picking) #picker{display:none}
+body.picking main{display:none}
+.pcard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:24px;display:grid;gap:14px;width:min(440px,100%)}
+.pcard h1{font-size:20px}
+.pcard label{display:grid;gap:4px;font-size:14px}
+.pcard select{width:100%}
+.pcard .row input{flex:1;min-width:0}
+</style>
+</head>
+<body class="locked">
+<div id="login">
+  <form id="lf">
+    <h1>PHABLAB telemetry</h1>
+    <label>Username <input type="text" id="lu" autocomplete="username" required></label>
+    <label>Password <input type="password" id="lp" autocomplete="current-password" required></label>
+    <button type="submit" class="go">Log in</button>
+    <p class="sub" id="lerr" role="alert"></p>
+  </form>
+</div>
+<div id="picker">
+  <div class="pcard">
+    <h1>Choose an ESP32</h1>
+    <label>Available ESP32s <select id="pickSel"></select></label>
+    <p class="sub" id="pickMsg"></p>
+    <button id="pickRm">Delete selected ESP32</button>
+    <button id="pickRestore" hidden>Restore deleted ESP32s</button>
+    <span class="sub">Not listed? Add its topic.</span>
+    <div class="row"><input type="text" id="pickTopic" placeholder="umd/phab/greenhouse" spellcheck="false" autocomplete="off"><button id="pickAdd">Add</button></div>
+    <button id="pickGo" class="go">Continue</button>
+  </div>
+</div>
+
+<main>
+<header>
+  <div>
+    <h1>ESP32 telemetry</h1>
+    <div class="sub" id="topicInfo"></div>
+  </div>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Connecting…</span></div>
+</header>
+
+<div id="fsBanner" class="banner" hidden>
+  <span>Failsafe active: all plugs were told to turn off and automatic control is disabled.</span>
+  <button id="fsReset">Clear failsafe</button>
+</div>
+
+<div id="dcBanner" class="banner" hidden>
+  <span>Disconnected from the broker. Download the readings you have so far?</span>
+  <button id="dcSave" class="go">Download CSV</button>
+</div>
+
+<dialog id="exitDlg">
+  <p>You have readings that have not been downloaded. Download a CSV before logging out?</p>
+  <div class="row">
+    <button id="exitSave" class="go">Download CSV and log out</button>
+    <button id="exitLeave">Log out without saving</button>
+    <button id="exitStay">Stay</button>
+  </div>
+</dialog>
+
+<div class="bar">
+  <button id="failBtn" class="danger">Emergency: turn off all plugs</button>
+  <button id="logoutBtn">Log out</button>
+  <button id="clearBtn">Clear saved settings</button>
+</div>
+
+<div class="bar">
+  <label>ESP32 <select id="devSel"></select></label>
+  <button id="addDev">Add ESP32</button>
+  <button id="rmDev">Remove ESP32</button>
+</div>
+
+<div class="bar">
+  <button id="recBtn" class="rec">Stop recording</button>
+  <button id="csvBtn">Export CSV</button>
+  <button id="resetBtn">Reset data</button>
+</div>
+
+<section class="panel">
+  <div class="ph"><h2>Plug control</h2><div class="row"><button id="addMany">Add several plugs</button><button id="addPlug">Add one plug</button></div></div>
+  <div class="row"><label>Shared topic base <input type="text" id="plugBase" size="28" autocomplete="off" spellcheck="false"></label></div>
+  <p class="sub">Give each plug a prefix on the plug itself of the base plus a short name, like base/plug1. Then you only type plug1 on its card.</p>
+  <p class="sub">Each plug has its own rules. Add a variable to watch, choose above or below, and set the limit. Rules with a blank limit are ignored.</p>
+  <div id="plugs" class="ctl"></div>
+  <ul id="log"></ul>
+</section>
+
+<section class="panel">
+  <div class="ph">
+    <h2>Graph</h2>
+    <label>Variable <select id="varSel"></select></label>
+  </div>
+  <div class="chartbox"><canvas id="chart"></canvas></div>
+</section>
+
+<section class="panel">
+  <div class="ph"><h2>Readings</h2><span class="sub" id="count">0 readings</span></div>
+  <div class="wrap" id="tableWrap"></div>
+</section>
+</main>
+
+<script>
+const BROKER = "wss://broker.hivemq.com:8884/mqtt";
+const TOPIC  = "umd/phab/esp32_telemetry";
+const MAX_SHOWN = 200;           // table rows displayed (all rows are kept and exported)
+
+let rows = [];                   // {t: Date, values: {key: value}}
+let keys = [];                   // variable names, discovered from incoming JSON
+let recording = true;
+
+const $ = id => document.getElementById(id);
+
+/* ---------- chart ---------- */
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const chart = new Chart($("chart"), {
+  type: "line",
+  data: { labels: [], datasets: [{ data: [], borderColor: css("--accent"), backgroundColor: css("--accent"),
+          borderWidth: 2, pointRadius: 3, tension: 0.2 }] },
+  options: { animation: false, maintainAspectRatio: false, plugins: { legend: { display: false } },
+    scales: { x: { ticks: { color: css("--mute"), maxTicksLimit: 8 }, grid: { color: css("--line") } },
+              y: { ticks: { color: css("--mute") }, grid: { color: css("--line") } } } }
+});
+
+function drawChart() {
+  const k = $("varSel").value;
+  chart.data.labels = rows.map(r => r.t.toLocaleTimeString());
+  chart.data.datasets[0].data = rows.map(r => typeof r.values[k] === "number" ? r.values[k] : null);
+  chart.update();
+}
+
+/* ---------- table ---------- */
+function drawTable() {
+  $("count").textContent = rows.length + (rows.length === 1 ? " reading" : " readings");
+  if (!rows.length) {
+    $("tableWrap").innerHTML = '<div class="empty">No readings yet. They appear here as the ESP32 publishes.</div>';
+    return;
+  }
+  const head = "<tr><th>Time</th>" + keys.map(k => "<th>" + k + "</th>").join("") + "</tr>";
+  const body = rows.slice(-MAX_SHOWN).reverse().map(r =>
+    "<tr><td>" + r.t.toLocaleTimeString() + "</td>" +
+    keys.map(k => "<td>" + (r.values[k] ?? "") + "</td>").join("") + "</tr>").join("");
+  $("tableWrap").innerHTML = "<table><thead>" + head + "</thead><tbody>" + body + "</tbody></table>";
+}
+
+function syncVariables() {
+  const sel = $("varSel"), prev = sel.value;
+  sel.innerHTML = keys.map(k => "<option>" + k + "</option>").join("");
+  if (keys.includes(prev)) sel.value = prev;
+  renderPlugs();
+}
+
+/* ---------- data in ---------- */
+function handleMessage(text, topic) {
+  let obj;
+  try { obj = JSON.parse(text); } catch { return; }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return;
+  checkRules(obj, topic);       // limits apply even while recording is paused
+  if (!recording) return;
+  const isActive = topic === activeTopic;
+  const d = isActive ? { rows, keys } : (datasets[topic] ||= { rows: [], keys: [] });
+  let added = false;
+  for (const k of Object.keys(obj)) if (!d.keys.includes(k)) { d.keys.push(k); added = true; }
+  d.rows.push({ t: new Date(), values: obj });
+  dirty = true;
+  if (added) { if (isActive) syncVariables(); else renderPlugs(); }
+  if (isActive) { drawTable(); drawChart(); }
+}
+
+/* ---------- controls ---------- */
+$("recBtn").onclick = () => {
+  recording = !recording;
+  $("recBtn").textContent = recording ? "Stop recording" : "Start recording";
+  $("recBtn").className = recording ? "rec" : "go";
+  updateStatus();
+};
+$("resetBtn").onclick = () => {
+  if (rows.length && !confirm("Delete all " + rows.length + " readings?")) return;
+  rows = []; keys = [];
+  syncVariables(); drawTable(); drawChart();
+};
+$("varSel").onchange = drawChart;
+function exportCsv() {
+  if (!rows.length) { alert("Nothing to export yet."); return; }
+  const esc = v => { v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const lines = [["time", ...keys].map(esc).join(",")];
+  rows.forEach(r => lines.push([r.t.toISOString(), ...keys.map(k => r.values[k])].map(esc).join(",")));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+  a.download = "telemetry_" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  dirty = false; hideDc();
+}
+$("csvBtn").onclick = exportCsv;
+
+/* ---------- MQTT ---------- */
+let connected = false;
+function updateStatus() {
+  $("dot").className = "dot" + (connected ? " on" : "");
+  $("statusText").textContent = !connected ? "Connecting to broker…" : recording ? "Connected, recording" : "Connected, recording paused";
+}
+let client = null;
+function connectBroker() {
+client = mqtt.connect(BROKER, { clientId: "web_" + Math.random().toString(16).slice(2, 10), reconnectPeriod: 3000 });
+client.on("connect", () => { connected = true; clearTimeout(dcTimer); hideDc(); updateStatus(); if (picking) client.subscribe(DISCOVERY); else devices.forEach(d => client.subscribe(d.topic)); plugs.forEach(p => { p.subscribed = ""; subscribePlug(p); }); });
+client.on("close", () => {
+  connected = false; updateStatus();
+  clearTimeout(dcTimer);
+  dcTimer = setTimeout(() => { if (!connected && hasUnsaved()) $("dcBanner").hidden = false; }, 10000);
+});
+client.on("message", (t, payload) => {
+  const text = new TextDecoder().decode(payload);
+  if (picking && /^umd\/phab\/[^/]+$/.test(t)) {      // chooser open: only note which ESP32s are publishing
+    try { const o = JSON.parse(text); if (o && typeof o === "object" && !Array.isArray(o)) { if (!hidden.includes(t)) { found.add(t); renderPicker(); } } } catch {}
+    return;
+  }
+  if (devices.some(d => d.topic === t)) return handleMessage(text, t);
+  const p = plugs.find(q => q.prefix && (t === q.prefix + "/status/switch:0" || t === q.prefix + "/online"));
+  if (!p) return;
+  p.seen = Date.now();
+  if (t.endsWith("/online")) p.online = text.trim() === "true";
+  else {
+    p.online = true;
+    try { const o = JSON.parse(text); if (typeof o.output === "boolean") p.on = o.output; }
+    catch { if (text === "on" || text === "off") p.on = text === "on"; }
+  }
+  updatePill(p);
+});
+}
+
+/* ---------- plug control (one card per plug) ---------- */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+const clean = s => s.trim().replace(/\/+$/, "");
+let devices = store.get("devices", [{ name: "ESP32", topic: TOPIC }]);
+let hidden = store.get("hiddenTopics", []);   // ESP32s the user deleted; discovery will not list them again
+const hide = t => { if (!hidden.includes(t)) hidden.push(t); store.set("hiddenTopics", hidden); };
+let activeTopic = store.get("activeTopic", devices[0] ? devices[0].topic : "");
+if (!devices.some(d => d.topic === activeTopic)) activeTopic = devices[0] ? devices[0].topic : "";
+const datasets = {};                       // readings for ESP32s that are not on screen
+const devOf = p => p.device || (devices[0] ? devices[0].topic : "");
+$("plugBase").value = store.get("plugBase", "");
+const base = () => clean($("plugBase").value);
+const shortOf = v => base() && v.startsWith(base() + "/") ? v.slice(base().length + 1) : v;
+$("plugBase").onchange = () => store.set("plugBase", base());
+const keysFor = t => t === activeTopic ? keys : (datasets[t]?.keys || []);
+let failsafe = false;
+let dirty = false, dcTimer = null;         // dirty = readings recorded since the last CSV download
+const hideDc = () => { $("dcBanner").hidden = true; };
+const hasUnsaved = () => dirty && (rows.length > 0 || Object.values(datasets).some(d => d.rows.length));
+const newPlug = (o = {}) => ({ name: o.name || "", prefix: o.prefix || "", device: o.device || "", open: o.open ?? true, margin: o.margin ?? "1",
+  rules: Array.isArray(o.rules) ? o.rules : Object.entries(o.rules || {}).map(([key, limit]) => ({ key, dir: "above", limit })),
+  enabled: false, latched: false, on: null, online: null, seen: 0, lastOff: 0, subscribed: "", pill: null });
+let plugs = store.get("plugs", []).map(newPlug);
+const savePlugs = () => store.set("plugs", plugs.map(p => ({ name: p.name, prefix: p.prefix, margin: p.margin, rules: p.rules, device: p.device, open: p.open })));
+const plugName = p => p.name || "Plug " + (plugs.indexOf(p) + 1);
+const plugTopics = x => [x + "/status/switch:0", x + "/online"];
+
+function logLine(msg) {
+  const li = document.createElement("li");
+  li.textContent = new Date().toLocaleTimeString() + "  " + msg;
+  $("log").prepend(li);
+  while ($("log").children.length > 50) $("log").lastChild.remove();
+}
+function sendPlug(p, state, why) {
+  if (!p.prefix) { logLine(plugName(p) + ": topic prefix is empty, command not sent"); return false; }
+  if (failsafe && state === "on") { logLine(plugName(p) + ": on blocked, failsafe is active"); return false; }
+  if (!connected) { logLine(plugName(p) + ": not connected to the broker, command not sent"); return false; }
+  client.publish(p.prefix + "/command/switch:0", state);
+  logLine(plugName(p) + " " + state + " (" + why + ")");
+  return true;
+}
+function updatePill(p) {
+  if (!p.pill) return;
+  const state = p.online === false ? "offline" : p.on === null ? (p.online ? "online" : "unknown") : p.on ? "on" : "off";
+  p.pill.textContent = "Plug: " + state + (p.enabled ? ", auto" : "");
+  p.pill.className = "pill" + (state === "on" ? " on" : state === "off" ? " off" : "");
+  if (p.ls) p.ls.textContent = p.prefix
+    ? "Listening on " + p.prefix + "/status/switch:0, " + (p.seen ? "last heard " + new Date(p.seen).toLocaleTimeString() : "nothing heard yet")
+    : "No topic prefix set for this plug";
+}
+function subscribePlug(p) {
+  if (!connected) return;
+  if (p.subscribed) client.unsubscribe(plugTopics(p.subscribed));
+  p.subscribed = p.prefix;
+  p.on = null;
+  if (p.prefix) { client.subscribe(plugTopics(p.prefix)); client.publish(p.prefix + "/command/switch:0", "status_update"); }
+  updatePill(p);
+}
+function renderPlugs() {
+  const box = $("plugs");
+  box.innerHTML = "";
+  if (!plugs.length) {
+    box.innerHTML = '<span class="sub">No plugs yet. Add one, paste its topic prefix, and set limits for the variables it should watch.</span>';
+    return;
+  }
+  plugs.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "plug";
+    card.innerHTML =
+      '<div class="row"><button class="tg" aria-label="Show or hide this plug"></button>' +
+      '<input type="text" class="nm" placeholder="Name (e.g. Heater)" size="16"><span class="pill"></span></div>' +
+      '<div class="pb ctl"><div class="sub ls"></div><div class="row"><input type="text" class="px" placeholder="Short name, e.g. plug1" size="30" autocomplete="off" spellcheck="false">' +
+      '<button class="rm">Remove</button></div>' +
+      '<div class="row"><label>ESP32 <select class="dv"></select></label>' +
+      '<label><input type="checkbox" class="en"> Automatic control</label>' +
+      '<label>Turn back on once readings are this far inside the limit: <input type="number" class="mg" min="0" step="any" style="width:70px"></label>' +
+      '<button class="bon">Plug on</button><button class="boff">Plug off</button></div>' +
+      '<div class="ctl rl"></div><div class="row"><button class="ar">Add variable to watch</button></div></div>';
+    const q = s => card.querySelector(s);
+    p.pill = q(".pill"); p.ls = q(".ls"); updatePill(p);
+    const setOpen = () => { q(".pb").hidden = !p.open; q(".tg").textContent = p.open ? "\u25BE" : "\u25B8"; q(".tg").setAttribute("aria-expanded", String(p.open)); };
+    q(".tg").onclick = () => { p.open = !p.open; savePlugs(); setOpen(); };
+    setOpen();
+    const dv = q(".dv");
+    devices.forEach(d => { const o = document.createElement("option"); o.value = d.topic; o.textContent = d.name; dv.appendChild(o); });
+    dv.value = devOf(p);
+    dv.onchange = e => { p.device = e.target.value; savePlugs(); drawRules(); };
+    q(".nm").value = p.name; q(".px").value = shortOf(p.prefix); q(".mg").value = p.margin; q(".en").checked = p.enabled;
+    q(".nm").oninput = e => { p.name = e.target.value; savePlugs(); };
+    q(".px").onchange = e => {
+      let v = clean(e.target.value);
+      if (v && !v.includes("/") && base()) v = base() + "/" + v;
+      p.prefix = v; e.target.value = shortOf(v); savePlugs(); subscribePlug(p);
+    };
+    q(".mg").onchange = e => { p.margin = e.target.value; savePlugs(); };
+    q(".en").onchange = e => { p.enabled = e.target.checked; p.latched = false;
+      updatePill(p); logLine(plugName(p) + ": automatic control " + (p.enabled ? "enabled" : "disabled")); };
+    q(".bon").onclick = () => { if (sendPlug(p, "on", "manual")) p.latched = false; };
+    q(".boff").onclick = () => sendPlug(p, "off", "manual");
+    q(".rm").onclick = () => {
+      if (p.subscribed && connected) client.unsubscribe(plugTopics(p.subscribed));
+      plugs = plugs.filter(x => x !== p); savePlugs(); renderPlugs();
+    };
+    const rl = q(".rl");
+    const drawRules = () => {
+      rl.innerHTML = "";
+      if (!p.rules.length) rl.innerHTML = '<span class="sub">No variables watched yet. Add one to give this plug a rule.</span>';
+      const names = [...new Set([...keysFor(devOf(p)), ...p.rules.map(x => x.key).filter(Boolean)])];
+      p.rules.forEach(r => {
+        if (!r.key && names[0]) r.key = names[0];
+        const row = document.createElement("div");
+        row.className = "rule";
+        row.innerHTML = 'Turn off when <select class="rk"></select>' +
+          '<select class="rd"><option value="above">is above</option><option value="below">is below</option></select>' +
+          '<input type="number" class="rv" step="any" placeholder="limit" style="width:100px"><button class="rx">Remove</button>';
+        const sel = row.querySelector(".rk");
+        if (!names.length) sel.innerHTML = '<option value="">no variables yet</option>';
+        names.forEach(n => { const o = document.createElement("option"); o.value = o.textContent = n; sel.appendChild(o); });
+        sel.value = r.key || "";
+        row.querySelector(".rd").value = r.dir || "above";
+        row.querySelector(".rv").value = r.limit ?? "";
+        sel.onchange = () => { r.key = sel.value; savePlugs(); };
+        row.querySelector(".rd").onchange = e => { r.dir = e.target.value; savePlugs(); };
+        row.querySelector(".rv").oninput = e => { r.limit = e.target.value; savePlugs(); };
+        row.querySelector(".rx").onclick = () => { p.rules.splice(p.rules.indexOf(r), 1); savePlugs(); drawRules(); };
+        rl.appendChild(row);
+      });
+    };
+    q(".ar").onclick = () => { p.rules.push({ key: keysFor(devOf(p))[0] || "", dir: "above", limit: "" }); savePlugs(); drawRules(); };
+    drawRules();
+    box.appendChild(card);
+  });
+}
+function checkRules(obj, topic) {
+  const now = Date.now();
+  plugs.forEach(p => {
+    if (!p.enabled || devOf(p) !== topic) return;
+    const margin = Math.max(0, parseFloat(p.margin) || 0);
+    let tripped = null, any = false, clear = true;
+    for (const r of p.rules) {
+      const lim = parseFloat(r.limit), v = obj[r.key];
+      if (r.limit === "" || r.limit == null || isNaN(lim) || typeof v !== "number") continue;
+      any = true;
+      const up = r.dir !== "below";
+      if ((up ? v > lim : v < lim) && !tripped) tripped = r.key + " " + v + (up ? " is above " : " is below ") + lim;
+      if (!(up ? v < lim - margin : v > lim + margin)) clear = false;
+    }
+    if (!any) return;
+    if (tripped) {
+      // send off once; resend every 10 s only if the plug reports it is still on
+      if (!p.latched || (p.on === true && now - p.lastOff > 10000)) {
+        if (sendPlug(p, "off", tripped)) { p.latched = true; p.lastOff = now; }
+      }
+    } else if (p.latched && clear) {
+      if (sendPlug(p, "on", "readings back within limits")) p.latched = false;
+    }
+  });
+}
+$("addPlug").onclick = () => { plugs.push(newPlug()); savePlugs(); renderPlugs(); };
+$("addMany").onclick = () => {
+  if (!base()) { alert("Enter the shared topic base first."); return; }
+  const n = parseInt(prompt("How many plugs? They will be named plug1, plug2, and so on.", "5"), 10);
+  if (!n || n < 1 || n > 20) return;
+  for (let i = 1; i <= n; i++) {
+    const prefix = base() + "/plug" + i;
+    if (plugs.some(x => x.prefix === prefix)) continue;
+    const p = newPlug({ name: "Plug " + i, prefix, device: activeTopic });
+    plugs.push(p); subscribePlug(p);
+  }
+  savePlugs(); renderPlugs();
+};
+renderPlugs();
+/* ---------- devices, failsafe, login ---------- */
+function showDevice() {
+  const sel = $("devSel");
+  sel.innerHTML = "";
+  devices.forEach(d => { const o = document.createElement("option"); o.value = d.topic; o.textContent = d.name; sel.appendChild(o); });
+  sel.value = activeTopic;
+  $("topicInfo").textContent = activeTopic;
+}
+function viewDevice(topic) {
+  datasets[activeTopic] = { rows, keys };
+  activeTopic = topic;
+  store.set("activeTopic", topic);
+  ({ rows, keys } = datasets[topic] || { rows: [], keys: [] });
+  showDevice(); syncVariables(); drawTable(); drawChart();
+}
+$("devSel").onchange = () => viewDevice($("devSel").value);
+$("addDev").onclick = () => {
+  const name = (prompt("Name for this ESP32 (for example Greenhouse):") || "").trim();
+  if (!name) return;
+  const topic = (prompt("MQTT topic it publishes to:") || "").trim();
+  if (!topic) return;
+  if (devices.some(d => d.topic === topic)) { alert("That topic is already in the list."); return; }
+  devices.push({ name, topic });
+  store.set("devices", devices);
+  if (connected) client.subscribe(topic);
+  showDevice(); renderPlugs();
+};
+$("rmDev").onclick = () => {
+  if (devices.length < 2) { alert("Keep at least one ESP32 in the list."); return; }
+  const d = devices.find(x => x.topic === activeTopic);
+  if (!confirm("Remove " + d.name + "? Its readings in this page will be lost.")) return;
+  if (connected) client.unsubscribe(d.topic);
+  delete datasets[d.topic]; hide(d.topic);
+  devices = devices.filter(x => x !== d);
+  plugs.forEach(p => { if (devOf(p) === d.topic) { p.device = devices[0].topic; p.enabled = false; p.latched = false; logLine(plugName(p) + ": its ESP32 was removed, automatic control disabled"); } });
+  store.set("devices", devices); savePlugs();
+  viewDevice(devices[0].topic); renderPlugs();
+};
+
+$("failBtn").onclick = () => {
+  failsafe = true;
+  $("fsBanner").hidden = false;
+  plugs.forEach(p => { p.enabled = false; p.latched = false; });
+  renderPlugs();
+  const targets = plugs.filter(p => p.prefix);
+  if (!connected) { alert("Not connected to the broker, so NO commands were sent. Switch the devices off by hand."); logLine("FAILSAFE pressed while offline: nothing was sent"); return; }
+  const send = () => targets.forEach(p => client.publish(p.prefix + "/command/switch:0", "off", { qos: 1 }));
+  send(); setTimeout(send, 2000); setTimeout(send, 6000);
+  logLine("FAILSAFE: off sent to " + targets.length + " plug(s), automatic control disabled");
+};
+$("fsReset").onclick = () => { failsafe = false; $("fsBanner").hidden = true; logLine("Failsafe cleared"); };
+
+const AUTH_SALT = "phab-salt-v1";
+const AUTH_HASH = "27d63db49009cb0c799eb713401eaf904ab98df6357edc988a1339061647395e";
+async function sha256(t) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
+}
+const DISCOVERY = "umd/phab/+";
+let picking = false;
+const found = new Set();                   // ESP32 topics heard while the chooser is open
+const pickerName = t => (devices.find(d => d.topic === t) || {}).name || t.split("/").pop();
+function renderPicker() {
+  const sel = $("pickSel"), prev = sel.value || activeTopic;
+  const topics = [...new Set([...devices.map(d => d.topic), ...found])].filter(t => !hidden.includes(t));
+  sel.innerHTML = "";
+  topics.forEach(t => {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = pickerName(t) + (found.has(t) ? " (publishing now)" : "") + " - " + t;
+    sel.appendChild(o);
+  });
+  if (topics.includes(prev)) sel.value = prev;
+  $("pickRestore").hidden = !hidden.length;
+  $("pickMsg").textContent = found.size ? found.size + " ESP32 publishing right now." : "Listening for ESP32s that are publishing...";
+}
+$("pickRm").onclick = () => {
+  const t = $("pickSel").value;
+  if (!t) return;
+  const d = devices.find(x => x.topic === t);
+  if (!confirm("Delete " + (d ? d.name : t) + "? It stays off the list until you add it again by topic or restore deleted ESP32s.")) return;
+  const affected = plugs.filter(p => devOf(p) === t);
+  devices = devices.filter(x => x.topic !== t);
+  hide(t); found.delete(t); delete datasets[t];
+  const next = devices[0] ? devices[0].topic : "";
+  if (activeTopic === t) { activeTopic = next; store.set("activeTopic", activeTopic); }
+  affected.forEach(p => { p.device = next; p.enabled = false; p.latched = false; });
+  store.set("devices", devices); savePlugs();
+  renderPicker();
+};
+$("pickRestore").onclick = () => { hidden = []; store.set("hiddenTopics", hidden); renderPicker(); };
+$("pickAdd").onclick = () => {
+  const t = $("pickTopic").value.trim();
+  if (!t) return;
+  hidden = hidden.filter(x => x !== t); store.set("hiddenTopics", hidden);
+  if (!devices.some(d => d.topic === t)) { devices.push({ name: t.split("/").pop(), topic: t }); store.set("devices", devices); }
+  $("pickTopic").value = "";
+  renderPicker();
+  $("pickSel").value = t;
+};
+$("pickGo").onclick = () => {
+  const t = $("pickSel").value;
+  if (!t) { alert("Choose an ESP32 first, or add one by its topic."); return; }
+  if (!devices.some(d => d.topic === t)) { devices.push({ name: pickerName(t), topic: t }); store.set("devices", devices); }
+  picking = false;
+  document.body.classList.remove("picking");
+  if (connected) { client.unsubscribe(DISCOVERY); devices.forEach(d => client.subscribe(d.topic)); }
+  viewDevice(t);
+  renderPlugs(); updateStatus();
+};
+let started = false;
+function startApp() {
+  if (started) return;
+  started = true;
+  document.body.classList.remove("locked");
+  picking = true;
+  document.body.classList.add("picking");
+  renderPicker();
+  connectBroker();
+  setInterval(() => {                      // ask every plug for its status; flag silent ones as offline
+    if (!connected) return;
+    plugs.forEach(p => {
+      if (!p.prefix) return;
+      if (p.seen && Date.now() - p.seen > 100000) { p.online = false; updatePill(p); }
+      client.publish(p.prefix + "/command/switch:0", "status_update");
+    });
+  }, 30000);
+  showDevice(); renderPlugs(); drawTable(); updateStatus();
+}
+$("lf").onsubmit = async e => {
+  e.preventDefault();
+  $("lerr").textContent = "";
+  if (!window.crypto || !crypto.subtle) { $("lerr").textContent = "Login needs a secure page. Open this file from your computer or over https."; return; }
+  const h = await sha256(AUTH_SALT + "|" + $("lu").value.trim().toUpperCase() + "|" + $("lp").value);
+  $("lp").value = "";
+  if (h === AUTH_HASH) { try { sessionStorage.setItem("phab_auth", "1"); } catch {} startApp(); }
+  else $("lerr").textContent = "Wrong username or password.";
+};
+const doLogout = () => { try { sessionStorage.removeItem("phab_auth"); } catch {} dirty = false; location.reload(); };
+$("logoutBtn").onclick = () => hasUnsaved() ? $("exitDlg").showModal() : doLogout();
+$("exitSave").onclick = () => { exportCsv(); setTimeout(doLogout, 700); };
+$("exitLeave").onclick = doLogout;
+$("exitStay").onclick = () => $("exitDlg").close();
+$("dcSave").onclick = exportCsv;
+window.addEventListener("beforeunload", e => { if (hasUnsaved()) { e.preventDefault(); e.returnValue = ""; } });
+$("clearBtn").onclick = () => {
+  if (!confirm("Delete all saved plugs, prefixes, limits and ESP32 entries from this browser? This cannot be undone.")) return;
+  ["plugs", "devices", "activeTopic", "hiddenTopics", "plugBase", "rules", "prefix", "margin"].forEach(k => { try { localStorage.removeItem(k); } catch {} });
+  location.reload();
+};
+try { if (sessionStorage.getItem("phab_auth") === "1") startApp(); } catch {}
+</script>
+</body>
+</html>
